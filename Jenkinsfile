@@ -3,8 +3,16 @@
 pipeline {
   agent any
 
+  parameters {
+    string(
+      name: 'CANARY_PERCENT',
+      defaultValue: '25',
+      description: 'Percentage of traffic to route to canary deployment'
+    )
+  }
+
   environment {
-    REGISTRY     = "docker.io/${REGISTRY}"
+    REGISTRY     = "docker.io/gauravchile"
     IMAGE_NAME   = "skycanary"
     STABLE_TAG   = "stable"
     LATEST_TAG   = "latest"
@@ -54,14 +62,14 @@ pipeline {
       }
     }
 
-    stage('🚦 Canary Rollout (25%)') {
+    stage("🚦 Canary Rollout (${params.CANARY_PERCENT}%)") {
       steps {
-        echo "⚙️ Rolling out canary deployment to 25% traffic..."
-        sh '''
+        echo "⚙️ Rolling out canary deployment to ${params.CANARY_PERCENT}% traffic..."
+        sh """
           kubectl -n ${NAMESPACE} patch virtualservice skycanary-vs --type=json \
-            -p='[{"op":"replace","path":"/spec/http/0/route/1/weight","value":25}]'
-          echo "✅ Canary rollout set to 25% traffic."
-        '''
+            -p='[{\"op\":\"replace\",\"path\":\"/spec/http/0/route/1/weight\",\"value\":${params.CANARY_PERCENT}}]'
+          echo "✅ Canary rollout set to ${params.CANARY_PERCENT}% traffic."
+        """
       }
     }
 
