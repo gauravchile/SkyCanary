@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skycanary-stable
+  namespace: skycanary
+  labels:
+    app: skycanary
+    version: stable
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: skycanary
+      version: stable
+  template:
+    metadata:
+      labels:
+        app: skycanary
+        version: stable
+    spec:
+      containers:
+        - name: app
+          image: ${REGISTRY}/skycanary:stable
+          imagePullPolicy: Always
+          env:
+            - name: APP_NAME
+              value: skycanary
+            - name: APP_VERSION
+              value: "stable"
+          ports:
+            - containerPort: 8090
+          readinessProbe:
+            httpGet:
+              path: /api/state
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/state
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skycanary-canary
+  namespace: skycanary
+  labels:
+    app: skycanary
+    version: canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: skycanary
+      version: canary
+  template:
+    metadata:
+      labels:
+        app: skycanary
+        version: canary
+    spec:
+      containers:
+        - name: app
+          image: ${REGISTRY}/skycanary:latest
+          imagePullPolicy: Always
+          env:
+            - name: APP_NAME
+              value: skycanary
+            - name: APP_VERSION
+              value: "canary"
+            - name: USE_K8S
+              value: "1"
+          ports:
+            - containerPort: 8090
+          readinessProbe:
+            httpGet:
+              path: /api/state
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/state
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 10

@@ -1,0 +1,40 @@
+# SkyCanary/docker-compose.yml
+version: "3.9"
+
+services:
+  skycanary-app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: skycanary:local
+    container_name: skycanary-app
+    restart: unless-stopped
+    ports:
+      - "8090:8080"                # App exposed on 8090 (Jenkins uses 8080)
+    environment:
+      - APP_NAME=skycanary
+      - APP_VERSION=canary
+      - USE_K8S=${USE_K8S:-0}      # 0 = Simulation, 1 = K8s integrated
+      - PORT=8080
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ./app:/opt/app             # Local app mount for live reload/dev
+    depends_on:
+      - redis
+    networks:
+      - skycanary-net
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: skycanary-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - skycanary-net
+
+networks:
+  skycanary-net:
+    driver: bridge
+

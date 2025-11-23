@@ -1,0 +1,17 @@
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: skycanary-dr
+  namespace: skycanary
+spec:
+  host: skycanary.skycanary.svc.cluster.local
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary
+  exportTo:
+    - "*"
+

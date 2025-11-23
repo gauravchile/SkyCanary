@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ app_name }} Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body class="{{ version }}">
+  <div class="container">
+    <h1>🚀 {{ app_name }} Dashboard</h1>
+    <div class="version-banner {{ version }}">
+      <span>{{ version | capitalize }} Deployment</span>
+    </div>
+
+    <div class="progress-container">
+      <label>Canary Rollout Progress:</label>
+      <div class="progress-bar">
+        <div id="progress" class="progress"></div>
+      </div>
+    </div>
+
+    <div id="weights"></div>
+
+    <button id="start-rollout">Start Rollout</button>
+    <div id="log" class="log"></div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
