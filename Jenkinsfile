@@ -1,70 +1,60 @@
+@Library('JenkinsSharedLibs') _
+
 pipeline {
   agent any
 
   environment {
-    DOCKER_USER = "${REGISTRY}"
-    APP_NAME    = "skycanary"
-    STABLE_TAG  = "stable"
-    LATEST_TAG  = "latest"
-    NAMESPACE   = "skycanary"
-    PATH        = "/usr/local/bin:${env.PATH}"
+    REGISTRY     = "docker.io/${REGISTRY}"
+    IMAGE_NAME   = "skycanary"
+    STABLE_TAG   = "stable"
+    LATEST_TAG   = "latest"
+    NAMESPACE    = "skycanary"
+    HEALTH_URL   = "http://localhost:8090/api/state"
+    PATH         = "/usr/local/bin:${env.PATH}"
   }
 
   stages {
 
-    stage('Checkout Code') {
+    stage('🧹 Clean Workspace') {
+      steps { clean_ws() }
+    }
+
+    stage('📦 Checkout Code') {
       steps {
-        echo "📦 Cloning repository..."
-        git branch: 'main', url: 'https://github.com/gauravchile/SkyCanary.git'
+        echo "📥 Cloning Git Repository..."
+        clone('https://github.com/gauravchile/SkyCanary.git', 'main')
       }
     }
 
-    stage('Build Docker Images') {
+    stage('🏗️ Build Docker Images') {
       steps {
-        echo "🐳 Building Docker images (stable & latest)..."
-        sh '''
-          docker build -t ${DOCKER_USER}/${APP_NAME}:${STABLE_TAG} \
-                       -t ${DOCKER_USER}/${APP_NAME}:${LATEST_TAG} app/
-        '''
-      }
-    }
-
-    stage('Push to Docker Hub') {
-      steps {
-        echo "📤 Pushing both images to Docker Hub..."
-        withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-          sh '''
-            echo "$PASS" | docker login -u "$USER" --password-stdin
-            docker push ${DOCKER_USER}/${APP_NAME}:${STABLE_TAG}
-            docker push ${DOCKER_USER}/${APP_NAME}:${LATEST_TAG}
-            docker logout
-          '''
+        script {
+          dir('app') {
+            docker_build("${IMAGE_NAME}", "${STABLE_TAG}", "${REGISTRY}")
+            docker_build("${IMAGE_NAME}", "${LATEST_TAG}", "${REGISTRY}")
+          }
         }
       }
     }
 
-    stage('Deploy to Kubernetes') {
+    stage('📤 Push Docker Images') {
       steps {
-        echo "🚀 Deploying SkyCanary manifests..."
-        sh '''
-          set -e
-          echo "📦 Applying namespace..."
-          kubectl apply -f kubernetes/base/namespace.yaml
-
-          echo "⏳ Waiting for namespace to initialize..."
-          sleep 5
-
-          echo "📦 Applying all Kubernetes manifests..."
-          kubectl apply -f kubernetes/base/ --validate=false
-
-          echo "🕒 Waiting for deployments to roll out..."
-          kubectl rollout status deploy/skycanary-stable -n ${NAMESPACE} --timeout=180s || true
-          kubectl rollout status deploy/skycanary-canary -n ${NAMESPACE} --timeout=180s || true
-        '''
+        script {
+          docker_push("${IMAGE_NAME}", "${STABLE_TAG}", "${REGISTRY}")
+          docker_push("${IMAGE_NAME}", "${LATEST_TAG}", "${REGISTRY}")
+        }
       }
     }
 
-    stage('Canary Rollout') {
+    stage('☸️ Deploy to Kubernetes') {
+      steps {
+        script {
+          k8s_deploy('kubernetes/base', "${NAMESPACE}")
+        }
+      }
+    }
+
+    stage('🚦 Canary Rollout (25%)') {
       steps {
         echo "⚙️ Rolling out canary deployment to 25% traffic..."
         sh '''
@@ -75,27 +65,33 @@ pipeline {
       }
     }
 
-    stage('Health Check') {
+    stage('🧠 Health Check') {
       steps {
-        echo "🧠 Performing post-deployment health check..."
-        script {
-          def response = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://localhost:8090/api/state || true", returnStdout: true).trim()
-          if (response == "200") {
-            echo "✅ SkyCanary is live and healthy!"
-          } else {
-            error("❌ Health check failed! Got HTTP ${response}")
-          }
-        }
+        echo "🧩 Performing health check..."
+        health_check("${HEALTH_URL}")
+      }
+    }
+
+    stage('📊 Generate Reports') {
+      steps {
+        generate_reports('reports')
       }
     }
   }
 
   post {
     success {
-      echo "🎉 Pipeline completed successfully — SkyCanary deployed and healthy!"
+      script {
+        notify_slack('#devops', "✅ SkyCanary pipeline succeeded — image pushed & deployed.")
+        notify_email('devops@skycanary.io', 'Build Success', "SkyCanary deployed successfully.")
+        backup_configs()
+      }
     }
     failure {
-      echo "🚨 Pipeline failed. Check Jenkins logs for details."
+      script {
+        notify_slack('#devops', "❌ SkyCanary pipeline failed. Rolling back...")
+        rollback_deploy("${NAMESPACE}", "${IMAGE_NAME}")
+      }
     }
   }
 }
