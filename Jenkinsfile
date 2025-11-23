@@ -12,13 +12,14 @@ pipeline {
   }
 
   environment {
-    REGISTRY     = "docker.io/${REGISTRY}"
+    REGISTRY     = "docker.io/gauravchile"
     IMAGE_NAME   = "skycanary"
-    STABLE_TAG   = "stable"
+    STABLE_TAG   = "stable-${BUILD_NUMBER}"
     LATEST_TAG   = "latest"
     NAMESPACE    = "skycanary"
     HEALTH_URL   = "http://localhost:8090/api/state"
     PATH         = "/usr/local/bin:${env.PATH}"
+    EMAIL_RECIPIENT = 'gauravchile07@gmail.com'
   }
 
   stages {
@@ -38,8 +39,8 @@ pipeline {
       steps {
         script {
           dir('app') {
-            docker_build("${IMAGE_NAME}", "${STABLE_TAG}", "${REGISTRY}")
-            docker_build("${IMAGE_NAME}", "${LATEST_TAG}", "${REGISTRY}")
+            docker_build("${REGISTRY}/${IMAGE_NAME}", "${STABLE_TAG}", ".")
+            docker_build("${REGISTRY}/${IMAGE_NAME}", "${LATEST_TAG}", ".")
           }
         }
       }
@@ -48,8 +49,8 @@ pipeline {
     stage('📤 Push Docker Images') {
       steps {
         script {
-          docker_push("${IMAGE_NAME}", "${STABLE_TAG}", "${REGISTRY}")
-          docker_push("${IMAGE_NAME}", "${LATEST_TAG}", "${REGISTRY}")
+          docker_push(imageName: "${REGISTRY}/${IMAGE_NAME}", imageTag: "${STABLE_TAG}")
+          docker_push(imageName: "${REGISTRY}/${IMAGE_NAME}", imageTag: "${LATEST_TAG}")
         }
       }
     }
@@ -67,7 +68,7 @@ pipeline {
         echo "⚙️ Rolling out canary deployment to ${params.CANARY_PERCENT}% traffic..."
         sh """
           kubectl -n ${NAMESPACE} patch virtualservice skycanary-vs --type=json \
-            -p='[{\"op\":\"replace\",\"path\":\"/spec/http/0/route/1/weight\",\"value\":${params.CANARY_PERCENT}}]'
+            -p='[{"op":"replace","path":"/spec/http/0/route/1/weight","value":${params.CANARY_PERCENT}}]'
           echo "✅ Canary rollout set to ${params.CANARY_PERCENT}% traffic."
         """
       }
@@ -91,7 +92,7 @@ pipeline {
     success {
       script {
         notify_slack('#devops', "✅ SkyCanary pipeline succeeded — image pushed & deployed.")
-        notify_email('devops@skycanary.io', 'Build Success', "SkyCanary deployed successfully.")
+        notify_email("${EMAIL_RECIPIENT}", '✅ Build Success', "SkyCanary deployed successfully.")
         backup_configs()
       }
     }
