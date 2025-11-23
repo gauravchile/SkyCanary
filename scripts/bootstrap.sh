@@ -87,7 +87,7 @@ sync_project() {
     fi
 }
 
-sync_project
+sync_project "$1"
 
 # === helm ===
 if ! command -v helm >/dev/null 2>&1; then
