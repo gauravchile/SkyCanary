@@ -12,7 +12,7 @@ pipeline {
   }
 
   environment {
-    REGISTRY     = "docker.io/gauravchile"
+    REGISTRY     = "docker.io/${REGISTRY}"
     IMAGE_NAME   = "skycanary"
     STABLE_TAG   = "stable"
     LATEST_TAG   = "latest"
