@@ -12,15 +12,17 @@ pipeline {
   }
 
   environment {
-    REGISTRY     = "docker.io/${REGISTRY}"
-    IMAGE_NAME   = "skycanary"
-    STABLE_TAG   = "stable-${BUILD_NUMBER}"
-    LATEST_TAG   = "latest"
-    NAMESPACE    = "skycanary"
-    HEALTH_URL   = "http://localhost:8090/api/state"
-    PATH         = "/usr/local/bin:${env.PATH}"
+    USER            = 'gauravchile'
+    REGISTRY        = 'docker.io'
+    IMAGE_NAME      = 'skycanary'
+    IMAGE_REPO      = "${REGISTRY}/${USER}/${IMAGE_NAME}"
+    NAMESPACE       = 'skycanary'
+    HEALTH_URL      = "http://localhost:8090/api/state"
     EMAIL_RECIPIENT = 'gauravchile07@gmail.com'
+    PATH            = "/usr/local/bin:/usr/bin:/bin:/home/ubuntu/.local/bin:${PATH}"
   }
+
+  options { timestamps() }
 
   stages {
 
@@ -30,8 +32,8 @@ pipeline {
 
     stage('📦 Checkout Code') {
       steps {
-        echo "📥 Cloning Git Repository..."
-        clone('https://github.com/gauravchile/SkyCanary.git', 'main')
+        echo "📥 Cloning SkyCanary repository..."
+        checkout scm
       }
     }
 
@@ -39,8 +41,8 @@ pipeline {
       steps {
         script {
           dir('app') {
-            docker_build("${REGISTRY}/${IMAGE_NAME}", "${STABLE_TAG}", ".")
-            docker_build("${REGISTRY}/${IMAGE_NAME}", "${LATEST_TAG}", ".")
+            docker_build("${env.IMAGE_REPO}", "app")
+            sh "docker tag ${env.IMAGE_REPO}:app ${env.IMAGE_REPO}:latest"
           }
         }
       }
@@ -49,8 +51,8 @@ pipeline {
     stage('📤 Push Docker Images') {
       steps {
         script {
-          docker_push(imageName: "${REGISTRY}/${IMAGE_NAME}", imageTag: "${STABLE_TAG}")
-          docker_push(imageName: "${REGISTRY}/${IMAGE_NAME}", imageTag: "${LATEST_TAG}")
+          docker_push("${env.IMAGE_REPO}", "app")
+          docker_push("${env.IMAGE_REPO}", "latest")
         }
       }
     }
@@ -58,26 +60,32 @@ pipeline {
     stage('☸️ Deploy to Kubernetes') {
       steps {
         script {
-          k8s_deploy('kubernetes/base', "${NAMESPACE}")
+          echo "🚀 Applying manifests to namespace ${env.NAMESPACE}..."
+          k8s_deploy('kubernetes/base', env.NAMESPACE)
         }
       }
     }
 
     stage("🚦 Canary Rollout (${params.CANARY_PERCENT}%)") {
       steps {
-        echo "⚙️ Rolling out canary deployment to ${params.CANARY_PERCENT}% traffic..."
-        sh """
-          kubectl -n ${NAMESPACE} patch virtualservice skycanary-vs --type=json \
-            -p='[{"op":"replace","path":"/spec/http/0/route/1/weight","value":${params.CANARY_PERCENT}}]'
-          echo "✅ Canary rollout set to ${params.CANARY_PERCENT}% traffic."
-        """
+        script {
+          echo "⚙️ Adjusting canary traffic to ${params.CANARY_PERCENT}%..."
+          sh """
+            kubectl -n ${env.NAMESPACE} patch virtualservice skycanary-vs --type=json \
+              -p='[{"op":"replace","path":"/spec/http/0/route/1/weight","value":${params.CANARY_PERCENT}}]'
+            sleep 10
+            kubectl get virtualservice skycanary-vs -n ${NAMESPACE} -o yaml
+          """
+        }
       }
     }
 
     stage('🧠 Health Check') {
       steps {
-        echo "🧩 Performing health check..."
-        health_check("${HEALTH_URL}")
+        script {
+          echo "🔍 Performing health check on ${env.HEALTH_URL}"
+          health_check(env.HEALTH_URL)
+        }
       }
     }
 
@@ -90,17 +98,30 @@ pipeline {
 
   post {
     success {
-      script {
-        notify_slack('#devops', "✅ SkyCanary pipeline succeeded — image pushed & deployed.")
-        notify_email("${EMAIL_RECIPIENT}", '✅ Build Success', "SkyCanary deployed successfully.")
-        backup_configs()
-      }
+      def summary = """
+        <b>SkyCanary Pipeline Success</b><br>
+        Build: <b>${BUILD_NUMBER}</b><br>
+        Image: ${env.IMAGE_REPO}:app-${env.IMAGE_TAG}<br>
+        Canary Traffic: ${params.CANARY_PERCENT}%<br>
+      """
+      notify_email(env.EMAIL_RECIPIENT, "✅ SkyCanary Success • Build ${BUILD_NUMBER}", summary)
+      notify_slack('#devops', "✅ SkyCanary Build #${BUILD_NUMBER} deployed successfully (${params.CANARY_PERCENT}% canary).")
     }
+
+    unstable {
+      notify_email(env.EMAIL_RECIPIENT, "⚠️ SkyCanary Warning", "Build marked UNSTABLE. Review scan or health results.")
+      notify_slack('#devops', "⚠️ SkyCanary build unstable. Review Jenkins logs.")
+    }
+
     failure {
-      script {
-        notify_slack('#devops', "❌ SkyCanary pipeline failed. Rolling back...")
-        rollback_deploy("${NAMESPACE}", "${IMAGE_NAME}")
-      }
+      notify_email(env.EMAIL_RECIPIENT, "❌ SkyCanary Failed", "Pipeline failed. Check Jenkins logs and deployment status.")
+      notify_slack('#devops', "❌ SkyCanary failed. Rolling back deployment...")
+      rollback_deploy(env.NAMESPACE, env.IMAGE_NAME)
+    }
+
+    always {
+      archiveArtifacts artifacts: 'reports/**/*.{json,html,txt}', fingerprint: true
+      cleanWs()
     }
   }
 }
