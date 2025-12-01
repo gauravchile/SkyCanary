@@ -16,13 +16,17 @@ pipeline {
     REGISTRY        = 'docker.io'
     IMAGE_NAME      = 'skycanary'
     IMAGE_REPO      = "${REGISTRY}/${USER}/${IMAGE_NAME}"
+    IMAGE_TAG       = "build-${BUILD_NUMBER}"
     NAMESPACE       = 'skycanary'
     HEALTH_URL      = "http://localhost:8090/api/state"
     EMAIL_RECIPIENT = 'gauravchile07@gmail.com'
     PATH            = "/usr/local/bin:/usr/bin:/bin:/home/ubuntu/.local/bin:${PATH}"
   }
 
-  options { timestamps() }
+  options {
+    timestamps()
+    ansiColor('xterm')
+  }
 
   stages {
 
@@ -37,22 +41,31 @@ pipeline {
       }
     }
 
-    stage('🏗️ Build Docker Images') {
+    stage('🏗️ Build Docker Image') {
       steps {
         script {
           dir('app') {
-            docker_build("${env.IMAGE_REPO}", "app")
-            sh "docker tag ${env.IMAGE_REPO}:app ${env.IMAGE_REPO}:latest"
+            docker_build(
+              imageName: "${env.IMAGE_REPO}",
+              imageTag: "${env.IMAGE_TAG}",
+              context: '.',
+              dockerfile: 'Dockerfile',
+              noCache: true
+            )
           }
         }
       }
     }
 
-    stage('📤 Push Docker Images') {
+    stage('📤 Push Docker Image') {
       steps {
         script {
-          docker_push("${env.IMAGE_REPO}", "app")
-          docker_push("${env.IMAGE_REPO}", "latest")
+          docker_push(
+            imageName: "${env.IMAGE_REPO}",
+            imageTag: "${env.IMAGE_TAG}",
+            credentials: 'dockerhub-creds',
+            pushLatest: true
+          )
         }
       }
     }
@@ -98,14 +111,16 @@ pipeline {
 
   post {
     success {
-      def summary = """
-        <b>SkyCanary Pipeline Success</b><br>
-        Build: <b>${BUILD_NUMBER}</b><br>
-        Image: ${env.IMAGE_REPO}:app-${env.IMAGE_TAG}<br>
-        Canary Traffic: ${params.CANARY_PERCENT}%<br>
-      """
-      notify_email(env.EMAIL_RECIPIENT, "✅ SkyCanary Success • Build ${BUILD_NUMBER}", summary)
-      notify_slack('#devops', "✅ SkyCanary Build #${BUILD_NUMBER} deployed successfully (${params.CANARY_PERCENT}% canary).")
+      script {
+        def summary = """
+          <b>SkyCanary Pipeline Success</b><br>
+          Build: <b>${BUILD_NUMBER}</b><br>
+          Image: ${env.IMAGE_REPO}:${env.IMAGE_TAG}<br>
+          Canary Traffic: ${params.CANARY_PERCENT}%<br>
+        """
+        notify_email(env.EMAIL_RECIPIENT, "✅ SkyCanary Success • Build ${BUILD_NUMBER}", summary)
+        notify_slack('#devops', "✅ SkyCanary Build #${BUILD_NUMBER} deployed successfully (${params.CANARY_PERCENT}% canary).")
+      }
     }
 
     unstable {
@@ -114,9 +129,11 @@ pipeline {
     }
 
     failure {
-      notify_email(env.EMAIL_RECIPIENT, "❌ SkyCanary Failed", "Pipeline failed. Check Jenkins logs and deployment status.")
-      notify_slack('#devops', "❌ SkyCanary failed. Rolling back deployment...")
-      rollback_deploy(env.NAMESPACE, env.IMAGE_NAME)
+      script {
+        notify_email(env.EMAIL_RECIPIENT, "❌ SkyCanary Failed", "Pipeline failed. Check Jenkins logs and deployment status.")
+        notify_slack('#devops', "❌ SkyCanary failed. Rolling back deployment...")
+        rollback_deploy(env.NAMESPACE, env.IMAGE_NAME)
+      }
     }
 
     always {
