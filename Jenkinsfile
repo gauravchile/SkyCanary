@@ -48,8 +48,6 @@ pipeline {
             docker_build(
               imageName: "${env.IMAGE_REPO}",
               imageTag: "${env.IMAGE_TAG}",
-              context: '.',
-              dockerfile: 'Dockerfile',
               noCache: true
             )
           }
